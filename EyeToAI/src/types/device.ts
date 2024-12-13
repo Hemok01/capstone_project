@@ -1,13 +1,17 @@
+import {Timestamp} from '@react-native-firebase/firestore';
 // src/types/device.ts
 
 export interface Device {
+  deviceId: string; // id 대신 deviceId 사용
   childId: string;
   parentId: string;
   name: string;
   model: string;
   platform: string;
-  status: 'active' | 'inactive';
-  lastConnected: timestamp;
+  osVersion: string; // osVersion 추가
+  status: 'active' | 'inactive' | 'pending';
+  deviceStatus: 'normal' | 'restricted' | 'blocked';
+  lastConnected: Timestamp;
   settings: {
     dailyLimit: number;
     notifications: boolean;

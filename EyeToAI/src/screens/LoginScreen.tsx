@@ -23,6 +23,7 @@ import {User} from '@react-native-google-signin/google-signin';
 import {GoogleSignin} from '@react-native-google-signin/google-signin';
 import {SvgProps} from 'react-native-svg'; // 추가
 import ItoaiLogo2 from '../assets/icons/itoai-icon2.svg'; // 추가
+import firestore from '@react-native-firebase/firestore';
 
 /**
  * 네비게이션 props 타입 정의
@@ -64,73 +65,39 @@ const LoginScreen = ({navigation, route}: Props) => {
 
   const handleGoogleLogin = async () => {
     try {
-      console.log('1. Google Play Services 확인 중...');
       await GoogleSignin.hasPlayServices();
-
-      console.log('2. Google 로그인 시작...');
-      const signInResult = await GoogleSignin.signIn();
-      console.log('로그인 결과:', signInResult);
-
-      console.log('3. 토큰 가져오기...');
       const {accessToken, idToken} = await GoogleSignin.getTokens();
-      console.log('Access Token 존재:', !!accessToken);
-      console.log('ID Token 존재:', !!idToken);
 
-      // 수정: idToken이 아닌 accessToken과 idToken을 모두 사용
-      if (!idToken) {
-        throw new Error('ID token not found');
-      }
+      if (!idToken) throw new Error('ID token not found');
 
-      console.log('4. Firebase 인증 정보 생성...');
-      // 이전 코드:
-      // const googleCredential = auth.GoogleAuthProvider.credential(idToken);
-
-      // 수정된 코드: idToken과 accessToken 모두 사용
       const googleCredential = auth.GoogleAuthProvider.credential(
         idToken,
         accessToken,
       );
-      console.log('Firebase credential 생성 완료');
-
-      console.log('5. Firebase 로그인 시도...');
       const userCredential = await auth().signInWithCredential(
         googleCredential,
       );
-      console.log('Firebase 로그인 성공! UID:', userCredential.user.uid);
+      const userId = userCredential.user.uid;
 
-      Alert.alert('로그인 성공', '구글 로그인이 완료되었습니다!', [
-        {
-          text: '확인',
-          onPress: () => {
-            if (route.params.userType === 'parent') {
-              navigation.replace('ParentDashboard', {
-                userType: 'parent',
-                userId: userCredential.user.uid,
-              });
-            } else {
-              console.log('Child login - to be implemented');
-            }
-          },
-        },
-      ]);
-    } catch (error: any) {
-      console.error('로그인 에러 세부정보:', {
-        code: error.code,
-        message: error.message,
-        fullError: error,
+      // Firebase users 컬렉션에 사용자 정보 저장
+      await firestore().collection('users').doc(userId).set({
+        email: userCredential.user.email,
+        name: userCredential.user.displayName,
+        userType: route.params.userType,
       });
 
-      let errorMessage = '구글 로그인에 실패했습니다.';
-
-      if (error.code === 'SIGN_IN_CANCELLED') {
-        errorMessage = '로그인이 취소되었습니다.';
-      } else if (error.code === 'PLAY_SERVICES_NOT_AVAILABLE') {
-        errorMessage = 'Google Play Services가 설치되어 있지 않습니다.';
-      } else if (error.code === 'DEVELOPER_ERROR') {
-        errorMessage = '개발자 설정 오류입니다. SHA-1 인증서를 확인해주세요.';
+      if (route.params.userType === 'parent') {
+        navigation.replace('ParentDashboard', {
+          userType: 'parent',
+          userId,
+        });
+      } else {
+        // 자녀는 기기 연동 필요
+        navigation.replace('QRScan');
       }
-
-      Alert.alert('로그인 실패', errorMessage);
+    } catch (error) {
+      console.error('Login error:', error);
+      Alert.alert('로그인 실패');
     }
   };
   /**
@@ -138,21 +105,35 @@ const LoginScreen = ({navigation, route}: Props) => {
    * 현재는 테스트용 임시 구현 (이메일: 'a', 비밀번호: 'a')
    */
   const handleLogin = async () => {
-    if (email === 'a' && password === 'a') {
-      Alert.alert('로그인 성공', '로그인이 완료되었습니다!', [
-        {
-          text: '확인',
-          onPress: () => {
-            if (route.params.userType === 'parent') {
-              navigation.replace('ParentDashboard', {
-                userType: 'parent',
-              });
-            } else {
-              console.log('Child login - to be implemented');
-            }
-          },
-        },
-      ]);
+    try {
+      const userCredential = await auth().signInWithEmailAndPassword(
+        email,
+        password,
+      );
+      const userId = userCredential.user.uid;
+
+      const userDoc = await firestore().collection('users').doc(userId).get();
+      const userData = userDoc.data();
+
+      if (!userData) {
+        Alert.alert('오류', '존재하지 않는 계정입니다.');
+        return;
+      }
+
+      if (
+        route.params.userType === 'parent' &&
+        userData.userType !== 'parent'
+      ) {
+        Alert.alert('오류', '부모 계정이 아닙니 다.');
+        return;
+      }
+
+      navigation.navigate('ParentDashboard', {
+        userType: 'parent',
+        userId: userId,
+      });
+    } catch (error: any) {
+      Alert.alert('로그인 실패', error.message);
     }
   };
 

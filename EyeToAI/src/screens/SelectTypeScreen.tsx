@@ -15,11 +15,16 @@ import ItoaiLogo from '../assets/icons/itoai-icon.svg';
 import ParentsIcon from '../assets/icons/parents-icon.svg';
 import ChildIcon from '../assets/icons/child-icon.svg';
 
-type Props = {
-  navigation: NativeStackNavigationProp<RootStackParamList, 'SelectType'>;
-};
+import {DeviceManager} from '../utils/device';
+import firestore from '@react-native-firebase/firestore';
+import {NativeStackScreenProps} from '@react-navigation/native-stack';
 
-const SelectTypeScreen = ({navigation}: Props) => {
+type SelectTypeScreenProps = NativeStackScreenProps<
+  RootStackParamList,
+  'SelectType'
+>;
+
+const SelectTypeScreen: React.FC<SelectTypeScreenProps> = ({navigation}) => {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(300)).current;
   const scaleAnim1 = useRef(new Animated.Value(0)).current;
@@ -70,6 +75,36 @@ const SelectTypeScreen = ({navigation}: Props) => {
     };
   };
 
+  const handleChildButton = async () => {
+    try {
+      const deviceInfo = await DeviceManager.getDeviceInfo();
+      if (!deviceInfo?.deviceId) {
+        throw new Error('디바이스 정보를 가져올 수 없습니다');
+      }
+
+      // connections 컬렉션에서 연동 상태 확인
+      const connectionsSnapshot = await firestore()
+        .collection('connections')
+        .where('deviceId', '==', deviceInfo.deviceId)
+        .where('status', '==', 'connected')
+        .get();
+
+      if (!connectionsSnapshot.empty) {
+        navigation.replace('ChildDashboard', {
+          userType: 'child',
+          deviceId: deviceInfo.deviceId,
+        });
+      } else {
+        navigation.navigate('FamilyAuth', {
+          userType: 'child',
+        });
+      }
+    } catch (error) {
+      console.error('Error checking device connection:', error);
+      navigation.navigate('FamilyAuth', {userType: 'child'});
+    }
+  };
+
   return (
     <View style={styles.container}>
       <Animated.View style={[styles.logoContainer, {opacity: fadeAnim}]}>
@@ -100,9 +135,7 @@ const SelectTypeScreen = ({navigation}: Props) => {
             style={[styles.buttonWrapper, animatePress(scaleAnim2)]}>
             <TouchableOpacity
               style={styles.circleButton}
-              onPress={() =>
-                navigation.navigate('FamilyAuth', {userType: 'child'})
-              }
+              onPress={handleChildButton}
               activeOpacity={0.8}>
               <ChildIcon width={120} height={120} {...({} as SvgProps)} />
             </TouchableOpacity>

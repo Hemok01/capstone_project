@@ -1,4 +1,3 @@
-// screens/ParentDashboardScreen.tsx
 import React, {useState, useEffect, useCallback} from 'react';
 import {
   View,
@@ -19,12 +18,17 @@ import {RootStackParamList} from '../types/navigation';
 import {ConnectCard} from '../components/common/ConnectCard';
 import auth from '@react-native-firebase/auth';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
-import {DeviceUsageData} from '../types/database';
-import {ParentService} from '../services/parentService';
+import {
+  Device,
+  User,
+  Connection,
+  Usage,
+  DeviceUsageData,
+} from '../types/database';
 import firestore from '@react-native-firebase/firestore';
-import {User} from '../types/database';
 import DonutChart from '../components/common/DonutChart';
 import ItoaiHeader from '../assets/icons/itoai-header.svg';
+import {ReportCard} from '../components/common/ReportCard';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'ParentDashboard'>;
@@ -36,134 +40,109 @@ const ParentDashboardScreen = ({navigation}: Props) => {
   const [loading, setLoading] = useState(true);
   const [childName, setChildName] = useState<string>('');
 
-  // fetchData를 useCallback으로 감싸기
-  const fetchData = useCallback(async () => {
+  // 공통 데이터 처리 함수
+  const processDeviceUsageData = async (deviceId: string) => {
+    const today = new Date().toISOString().split('T')[0];
+
+    try {
+      const [deviceDoc, userSnapshot, usageDoc] = await Promise.all([
+        firestore().collection('devices').doc(deviceId).get(),
+        firestore()
+          .collection('users')
+          .where('deviceId', '==', deviceId)
+          .where('userType', '==', 'child')
+          .limit(1)
+          .get(),
+        firestore().collection('usage').doc(`${deviceId}_${today}`).get(),
+      ]);
+
+      if (!deviceDoc.exists || !usageDoc.exists) {
+        console.warn('[processDeviceUsageData] Missing data:', {
+          deviceExists: deviceDoc.exists,
+          usageExists: usageDoc.exists,
+        });
+        return null;
+      }
+
+      const deviceData = deviceDoc.data() as Device;
+      const childName = userSnapshot.empty
+        ? ''
+        : userSnapshot.docs[0].data()?.name || '';
+      const usageData = usageDoc.data() as Usage;
+
+      return {
+        deviceId,
+        deviceName: deviceData.name,
+        childName,
+        date: today,
+        timeLimit: usageData.timeLimit,
+        usageTime: usageData.usageTime,
+        status: usageData.status,
+        restrictions: usageData.restrictions,
+        appUsages: usageData.appUsages,
+      };
+    } catch (error) {
+      return null;
+    }
+  };
+
+  // fetchData 함수
+  const fetchData = async () => {
     try {
       const parentId = auth().currentUser?.uid;
-      if (!parentId) {
-        console.log('No parent ID found');
+      if (!parentId) return;
+
+      const connectionsSnapshot = await firestore()
+        .collection('connections')
+        .where('parentId', '==', parentId)
+        .where('status', '==', 'connected')
+        .orderBy('lastSync', 'desc')
+        .limit(1)
+        .get();
+
+      if (connectionsSnapshot.empty) {
+        setChildName('');
+        setDeviceData(null);
         return;
       }
 
-      const parentDoc = await firestore()
-        .collection('users')
-        .doc(parentId)
-        .get();
-      const parentData = parentDoc.data();
-      const selectedDeviceId = parentData?.selectedDeviceId;
-      const selectedChildName = parentData?.selectedChildName;
-
-      if (selectedDeviceId && selectedChildName) {
-        setChildName(selectedChildName);
-        const deviceUsageData = await ParentService.fetchDeviceData(
-          selectedDeviceId,
-        );
-        if (deviceUsageData) {
-          setDeviceData(deviceUsageData);
-        }
-      } else {
-        setChildName('');
-        setDeviceData(null);
+      const deviceId = connectionsSnapshot.docs[0].data().deviceId;
+      const deviceUsageData = await processDeviceUsageData(deviceId);
+      if (deviceUsageData) {
+        setChildName(deviceUsageData.childName);
+        setDeviceData(deviceUsageData);
       }
     } catch (error) {
-      console.error('Error fetching data:', error);
     } finally {
       setLoading(false);
     }
-  }, []);
-
-  const routineData = [
-    {value: 40, color: '#8CD9F0', key: '동영상'},
-    {value: 30, color: '#A5D4A7', key: '게임'},
-    {value: 20, color: '#FFD700', key: 'SNS'},
-    {value: 10, color: '#FFB6C1', key: '기타'},
-  ];
-
+  };
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const parentId = auth().currentUser?.uid;
-        if (!parentId) {
-          console.log('No parent ID found');
-          return;
-        }
-
-        // 선택된 디바이스 ID와 자녀 이름 가져오기
-        const parentDoc = await firestore()
-          .collection('users')
-          .doc(parentId)
-          .get();
-        const parentData = parentDoc.data();
-        const selectedDeviceId = parentData?.selectedDeviceId;
-        const selectedChildName = parentData?.selectedChildName;
-
-        if (selectedDeviceId && selectedChildName) {
-          setChildName(selectedChildName);
-          const deviceUsageData = await ParentService.fetchDeviceData(
-            selectedDeviceId,
-          );
-          if (deviceUsageData) {
-            setDeviceData(deviceUsageData);
-          }
-        } else {
-          // 선택된 자녀가 없는 경우 상태 초기화
-          setChildName('');
-          setDeviceData(null);
-        }
-      } catch (error) {
-        console.error('Error fetching data:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    // 부모 문서의 변경사항을 감지하는 리스너
     const parentId = auth().currentUser?.uid;
     if (!parentId) return;
 
-    const unsubscribeParent = firestore()
-      .collection('users')
-      .doc(parentId)
-      .onSnapshot(
-        doc => {
-          console.log('Parent document updated');
-          fetchData();
-        },
-        error => console.error('Parent document listener error:', error),
-      );
+    fetchData();
 
-    // 연결 상태 변경을 감지하는 리스너
-    const unsubscribeConnections = firestore()
+    // 실시간 구독으로 변경
+    const unsubscribe = firestore()
       .collection('connections')
       .where('parentId', '==', parentId)
-      .onSnapshot(
-        snapshot => {
-          console.log('Connections updated:', snapshot.size);
-          fetchData();
-        },
-        error => console.error('Connections listener error:', error),
-      );
+      .where('status', '==', 'connected')
+      .orderBy('lastSync', 'desc')
+      .limit(1)
+      .onSnapshot(async snapshot => {
+        if (!snapshot || snapshot.empty) {
+          setDeviceData(null);
+          return;
+        }
 
-    // 컴포넌트 언마운트 시 리스너 해제
-    return () => {
-      unsubscribeParent();
-      unsubscribeConnections();
-    };
-  }, []); // 빈 의존성 배열로 마운트 시에만 리스너 설정
+        const deviceId = snapshot.docs[0].data().deviceId;
+        const data = await processDeviceUsageData(deviceId);
+        if (data) setDeviceData(data);
+      });
 
-  // Optional: 앱이 포그라운드로 돌아올 때마다 데이터 새로고침
-  useEffect(() => {
-    const subscription = AppState.addEventListener('change', nextAppState => {
-      if (nextAppState === 'active') {
-        fetchData();
-      }
-    });
-
-    return () => {
-      subscription.remove();
-    };
-  }, []);
-
+    return () => unsubscribe();
+  });
   // 프로그레스 바 컴포넌트
   const ProgressBar = ({progress}: {progress: number}) => (
     <View style={styles.progressBarContainer}>
@@ -172,6 +151,13 @@ const ParentDashboardScreen = ({navigation}: Props) => {
       />
     </View>
   );
+
+  const routineData = [
+    {value: 40, color: '#8CD9F0', key: '동영상'},
+    {value: 30, color: '#A5D4A7', key: '게임'},
+    {value: 20, color: '#FFD700', key: 'SNS'},
+    {value: 10, color: '#FFB6C1', key: '기타'},
+  ];
 
   const handleLogout = () => {
     Alert.alert('로그아웃', '로그아웃 하시겠습니까?', [
@@ -222,57 +208,54 @@ const ParentDashboardScreen = ({navigation}: Props) => {
         {deviceData && (
           <>
             {/* 총 사용 시간 카드 */}
-            <View style={styles.card}>
+            <TouchableOpacity
+              style={styles.card}
+              onPress={() => navigation.navigate('TimeManagement')}>
               <View style={styles.cardHeader}>
-                <Text style={styles.cardTitle}>총 사용 시간</Text>
+                <Text style={styles.cardTitle}>폰 사용 시간</Text>
                 <MaterialIcons name="chevron-right" size={24} color="#666" />
               </View>
               <View style={styles.timeInfo}>
                 <Text style={styles.timeText}>
-                  {Math.floor(deviceData.usage.totalUsage / 60)}시간{' '}
-                  {deviceData.usage.totalUsage % 60}분
+                  {Math.floor(deviceData.usageTime / 60)}시간{' '}
+                  {deviceData.usageTime % 60}분
                 </Text>
                 <Text style={styles.remainText}>
-                  {deviceData.usage.totalLimit - deviceData.usage.totalUsage}분
-                  남음
+                  {deviceData.timeLimit - deviceData.usageTime}분 남음
                 </Text>
               </View>
               <ProgressBar
-                progress={
-                  (deviceData.usage.totalUsage / deviceData.usage.totalLimit) *
-                  100
-                }
+                progress={(deviceData.usageTime / deviceData.timeLimit) * 100}
               />
-            </View>
+            </TouchableOpacity>
 
-            {/* 앱별 사용 시간 카드 */}
+            {/* 앱별 사용시간 카드 */}
             <View style={styles.card}>
               <View style={styles.cardHeader}>
                 <Text style={styles.cardTitle}>앱별 사용 시간</Text>
                 <MaterialIcons name="chevron-right" size={24} color="#666" />
               </View>
-              {deviceData.usage.appUsage.map((app, index) => (
-                <View key={index} style={styles.appItem}>
-                  <View style={styles.appHeader}>
-                    <View style={styles.appInfo}>
-                      <Image
-                        source={
-                          app.appName === 'YouTube'
-                            ? require('../assets/youtube-logo.png')
-                            : require('../assets/insta-logo.jpg')
-                        }
-                        style={styles.appIcon}
-                      />
+              {deviceData?.appUsages?.map((app, index) => (
+                <View key={index} style={styles.appUsageItem}>
+                  <View style={styles.appInfoRow}>
+                    <MaterialIcons name="android" size={24} color="#8CD9F0" />
+                    <View style={styles.appInfoContainer}>
                       <Text style={styles.appName}>{app.appName}</Text>
+                      <Text style={styles.timeText}>
+                        {Math.floor(app.usageTime / 60)}시간{' '}
+                        {app.usageTime % 60}분
+                      </Text>
                     </View>
-                    <Text style={styles.appRemainTime}>
-                      {app.timeLimit - app.usageTime}분 남음
+                    <Text style={styles.usagePercent}>
+                      {((app.usageTime / deviceData.usageTime) * 100).toFixed(
+                        1,
+                      )}
+                      %
                     </Text>
                   </View>
                   <ProgressBar
-                    progress={(app.usageTime / app.timeLimit) * 100}
+                    progress={(app.usageTime / deviceData.timeLimit) * 100}
                   />
-                  <Text style={styles.usedTime}>1시간</Text>
                 </View>
               ))}
             </View>
@@ -303,6 +286,20 @@ const ParentDashboardScreen = ({navigation}: Props) => {
                 </View>
               </View>
             </View>
+
+            {/* 프로필 카드 다음에 추가 */}
+            {deviceData && (
+              <ReportCard
+                onPress={() =>
+                  navigation.navigate('Report', {
+                    totalTime: deviceData.usageTime,
+                    targetTime: deviceData.timeLimit,
+                  })
+                }
+                totalTime={deviceData.usageTime}
+                targetTime={deviceData.timeLimit}
+              />
+            )}
           </>
         )}
         {/* 로딩 표시 */}
@@ -318,6 +315,52 @@ const ParentDashboardScreen = ({navigation}: Props) => {
 };
 
 const styles = StyleSheet.create({
+  warningText: {
+    color: '#FF6B6B',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  statusText: {
+    color: '#666',
+    fontSize: 14,
+  },
+  blockedAppItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+
+  appUsageItem: {
+    marginBottom: 16,
+  },
+  appInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  appInfoContainer: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  appName: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#333',
+  },
+  timeText: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 4,
+  },
+  usagePercent: {
+    fontSize: 14,
+    color: '#8CD9F0',
+    fontWeight: '500',
+  },
   container: {
     flex: 1,
     backgroundColor: '#8CD9F0',
@@ -399,11 +442,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 8,
   },
-  timeText: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#333',
-  },
+
   remainText: {
     fontSize: 14,
     color: '#666',
@@ -438,11 +477,7 @@ const styles = StyleSheet.create({
     height: 24,
     borderRadius: 6,
   },
-  appName: {
-    fontSize: 14,
-    color: '#333',
-    fontWeight: '500',
-  },
+
   appRemainTime: {
     fontSize: 12,
     color: '#666',

@@ -2,8 +2,10 @@
   "extends": "@react-native/typescript-config/tsconfig.json",
   "compilerOptions": {
     "baseUrl": ".",
+    "jsx": "react-native", // 이 부분이 중요합니다
+
     "paths": {
-      "@/*":["./*"],
+      "@/*": ["./*"],
       "@assets/*": ["src/assets/*"],
       "@components/*": ["src/components/*"],
       "@hooks/*": ["src/hooks/*"],

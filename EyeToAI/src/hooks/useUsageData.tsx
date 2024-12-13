@@ -1,5 +1,3 @@
-// src/hooks/useUsageData.ts
-
 import {useState, useEffect} from 'react';
 import firestore from '@react-native-firebase/firestore';
 import {UsageData} from '../types/device';
@@ -11,11 +9,12 @@ export const useUsageData = (deviceId: string) => {
 
   useEffect(() => {
     if (deviceId) {
-      subscribeToUsageData();
+      const unsubscribe = subscribeToUsageData();
+      return () => unsubscribe?.();
     }
   }, [deviceId]);
 
-  const validateUsageData = (usage: Partial<UsageData>) => {
+  const validateUsageData = (usage: UsageData) => {
     if (!usage.startTime || !usage.endTime) {
       throw new Error('Invalid usage time data');
     }
@@ -56,8 +55,9 @@ export const useUsageData = (deviceId: string) => {
   const recordUsage = async (appId: string, duration: number) => {
     if (!deviceId) return;
 
-    const newUsage: Partial<UsageData> = {
+    const newUsage: UsageData = {
       deviceId,
+      childId: '', // Required field from UsageData interface
       startTime: new Date(),
       endTime: new Date(),
       duration,
@@ -66,6 +66,7 @@ export const useUsageData = (deviceId: string) => {
       },
     };
 
+    validateUsageData(newUsage);
     await firestore().collection('usage').add(newUsage);
   };
 

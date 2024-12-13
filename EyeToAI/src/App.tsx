@@ -1,47 +1,61 @@
 import 'react-native-gesture-handler';
-import React, {useEffect} from 'react';
+import React, {useEffect, useState, createContext, useContext} from 'react';
 import {SafeAreaProvider} from 'react-native-safe-area-context';
-import firebase from '@react-native-firebase/app';
-import firestore from '@react-native-firebase/firestore';
-import UsageReportScreen from './screens/UsageReportScreen'; // UsageReport 스크린 import
+import auth, {FirebaseAuthTypes} from '@react-native-firebase/auth';
+import Toast from 'react-native-toast-message';
 import RootNavigator from '@navigation/RootNavigator';
-import {AuthProvider} from '../src/contexts/AuthContext';
-import AuthNavigator from '../src/navigation/AuthNavigator';
+import {FCMService} from './services/FCMService';
+
+export const AuthContext = createContext<{
+  user: FirebaseAuthTypes.User | null;
+  loading: boolean;
+  logout: () => void;
+}>({
+  user: null,
+  loading: true,
+  logout: () => {},
+});
 
 const App = () => {
-  useEffect(() => {
-    const initializeFirebase = async () => {
-      try {
-        if (firebase.apps.length === 0) {
-          await firebase.initializeApp({
-            apiKey: 'AIzaSyAEkJGdvEOCHceuGTiAKWbB_-KepA-RWZo',
-            appId: '1:598185887142:android:d5e9a9b3ed2d14caf9fb67',
-            projectId: 'eyetoai',
-            storageBucket: 'eyetoai.appspot.com',
-            messagingSenderId: '598185887142',
-          });
+  const [user, setUser] = useState<FirebaseAuthTypes.User | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
 
-          // Firestore 연결 테스트
-          try {
-            await firestore().collection('test').doc('test').get();
-            console.log('Firestore connection successful');
-          } catch (firestoreError) {
-            console.error('Firestore connection test failed:', firestoreError);
+  useEffect(() => {
+    const initializeAuth = () => {
+      const unsubscribeAuth = auth().onAuthStateChanged(currentUser => {
+        setUser(currentUser);
+        setLoading(false);
+
+        // FCM 초기화
+        if (currentUser) {
+          if (__DEV__) {
+            const fcmService = new FCMService({userId: currentUser.uid});
+            fcmService.init();
           }
         }
-      } catch (error) {
-        console.error('Firebase initialization error:', error);
-      }
+      });
+
+      return () => unsubscribeAuth();
     };
 
-    initializeFirebase();
+    initializeAuth();
   }, []);
 
+  const logout = async () => {
+    await auth().signOut();
+    setUser(null);
+  };
+
   return (
-    <SafeAreaProvider>
-      <RootNavigator />
-    </SafeAreaProvider>
+    <AuthContext.Provider value={{user, loading, logout}}>
+      <SafeAreaProvider>
+        <RootNavigator />
+        <Toast />
+      </SafeAreaProvider>
+    </AuthContext.Provider>
   );
 };
+
+export const useAuth = () => useContext(AuthContext);
 
 export default App;

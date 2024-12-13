@@ -1,5 +1,3 @@
-// src/hooks/useConnection.ts
-
 import {useState, useEffect} from 'react';
 import firestore from '@react-native-firebase/firestore';
 import {Device, DeviceConnection} from '../types/device';
@@ -10,36 +8,19 @@ export const useConnection = () => {
   const [connectionStatus, setConnectionStatus] =
     useState<DeviceConnection | null>(null);
   const [loading, setLoading] = useState(true);
-  const MAX_RETRY_ATTEMPTS = 3;
 
   useEffect(() => {
-    if (deviceInfo?.id) {
+    if (deviceInfo?.deviceId) {
       subscribeToConnectionStatus();
     }
-  }, [deviceInfo?.id]);
-
-  const connectDeviceWithRetry = async (
-    childId: string,
-    parentId: string,
-    attempt = 1,
-  ) => {
-    try {
-      return await connectDevice(childId, parentId);
-    } catch (error) {
-      if (attempt < MAX_RETRY_ATTEMPTS) {
-        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
-        return connectDeviceWithRetry(childId, parentId, attempt + 1);
-      }
-      throw error;
-    }
-  };
+  }, [deviceInfo?.deviceId]);
 
   const subscribeToConnectionStatus = () => {
-    if (!deviceInfo?.id) return;
+    if (!deviceInfo?.deviceId) return;
 
     return firestore()
       .collection('connections')
-      .where('deviceId', '==', deviceInfo.id)
+      .where('deviceId', '==', deviceInfo.deviceId)
       .onSnapshot(snapshot => {
         const connection = snapshot.docs[0]?.data() as DeviceConnection;
         setConnectionStatus(connection || null);
@@ -48,10 +29,10 @@ export const useConnection = () => {
   };
 
   const connectDevice = async (childId: string, parentId: string) => {
-    if (!deviceInfo?.id) throw new Error('Device not initialized');
+    if (!deviceInfo?.deviceId) throw new Error('Device not initialized');
 
     const connection: DeviceConnection = {
-      deviceId: deviceInfo.id,
+      deviceId: deviceInfo.deviceId,
       childId,
       parentId,
       connectedAt: new Date(),
@@ -60,18 +41,18 @@ export const useConnection = () => {
 
     await firestore()
       .collection('connections')
-      .doc(deviceInfo.id)
+      .doc(deviceInfo.deviceId)
       .set(connection);
 
     return connection;
   };
 
   const disconnectDevice = async () => {
-    if (!deviceInfo?.id) return;
+    if (!deviceInfo?.deviceId) return;
 
     await firestore()
       .collection('connections')
-      .doc(deviceInfo.id)
+      .doc(deviceInfo.deviceId)
       .update({status: 'revoked'});
   };
 

@@ -11,9 +11,15 @@ import {RootStackParamList} from '../types/navigation';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import {Header} from '../components/common/Header';
 
-type Props = NativeStackScreenProps<RootStackParamList, 'FamilyAuth'>;
+type FamilyAuthScreenProps = NativeStackScreenProps<
+  RootStackParamList,
+  'FamilyAuth'
+>;
 
-const FamilyAuthScreen = ({navigation}: Props) => {
+const FamilyAuthScreen: React.FC<FamilyAuthScreenProps> = ({
+  navigation,
+  route,
+}) => {
   return (
     <SafeAreaView style={styles.container}>
       <Header title="가족인증" onBack={() => navigation.goBack()} />

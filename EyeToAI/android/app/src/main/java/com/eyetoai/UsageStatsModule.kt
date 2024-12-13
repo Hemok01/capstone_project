@@ -10,11 +10,16 @@ import android.os.Process
 import android.provider.Settings
 import com.facebook.react.bridge.*
 import java.util.*
+import android.content.pm.ApplicationInfo
+
+
 
 class UsageStatsModule(private val reactContext: ReactApplicationContext) : 
     ReactContextBaseJavaModule(reactContext) {
 
     override fun getName() = "UsageStatsModule"
+
+
 
 @ReactMethod
 fun checkPermission(promise: Promise) {
@@ -45,43 +50,44 @@ fun checkPermission(promise: Promise) {
     }
 
     @ReactMethod
-    fun getUsageStats(days: Int, promise: Promise) {
-        try {
-            val usageStatsManager = reactContext.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
-            
-            val calendar = Calendar.getInstance().apply {
-                add(Calendar.DAY_OF_YEAR, -days)
-            }
-            
-            val startTime = calendar.timeInMillis
-            val endTime = System.currentTimeMillis()
-
-            val stats = usageStatsManager.queryUsageStats(
-                UsageStatsManager.INTERVAL_DAILY,
-                startTime,
-                endTime
-            )
-
-            val usageData = Arguments.createArray()
-
-            stats
-                .filter { it.totalTimeInForeground > 0 }
-                .forEach { stat ->
-                    Arguments.createMap().apply {
-                        putString("packageName", stat.packageName)
-                        putDouble("lastTimeUsed", stat.lastTimeUsed.toDouble())
-                        putDouble("totalTimeInForeground", stat.totalTimeInForeground.toDouble())
-                        putDouble("firstTimeStamp", stat.firstTimeStamp.toDouble())
-                        putDouble("lastTimeStamp", stat.lastTimeStamp.toDouble())
-                        usageData.pushMap(this)
-                    }
-                }
-
-            promise.resolve(usageData)
-        } catch (e: Exception) {
-            promise.reject("ERROR", e.message)
+fun getUsageStats(days: Int, promise: Promise) {
+    try {
+        val usageStatsManager = reactContext.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+        
+        val calendar = Calendar.getInstance().apply {
+            add(Calendar.DAY_OF_YEAR, -days)
         }
+        
+        val startTime = calendar.timeInMillis
+        val endTime = System.currentTimeMillis()
+
+        val stats = usageStatsManager.queryUsageStats(
+            UsageStatsManager.INTERVAL_DAILY,
+            startTime,
+            endTime
+        )
+
+        val usageData = Arguments.createArray()
+
+        stats
+            .filter { it.totalTimeInForeground > 0 }
+            .forEach { stat ->
+                Arguments.createMap().apply {
+                    putString("packageName", stat.packageName)
+                    putString("category", getAppCategory(stat.packageName))
+                    putDouble("lastTimeUsed", stat.lastTimeUsed.toDouble())
+                    putDouble("totalTimeInForeground", stat.totalTimeInForeground.toDouble())
+                    putDouble("firstTimeStamp", stat.firstTimeStamp.toDouble())
+                    putDouble("lastTimeStamp", stat.lastTimeStamp.toDouble())
+                    usageData.pushMap(this)
+                }
+            }
+
+        promise.resolve(usageData)
+    } catch (e: Exception) {
+        promise.reject("ERROR", e.message)
     }
+}
 
     @ReactMethod
     fun getAppName(packageName: String, promise: Promise) {
@@ -94,4 +100,20 @@ fun checkPermission(promise: Promise) {
             promise.resolve(packageName) // 앱 이름을 가져올 수 없는 경우 패키지명 반환
         }
     }
+
+    
+    fun getAppCategory(packageName: String): String {
+    try {
+        val pm = reactContext.packageManager
+        val ai = pm.getApplicationInfo(packageName, 0)
+        return ai.category.toString()
+    } catch (e: Exception) {
+        return "UNKNOWN"
+    }
 }
+
+
+
+}
+
+    

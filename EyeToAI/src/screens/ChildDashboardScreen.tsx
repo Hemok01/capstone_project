@@ -8,23 +8,19 @@ import {
   Alert,
   NativeModules,
   Platform,
-  ActivityIndicator,
   ToastAndroid,
 } from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {RootStackParamList} from '../types/navigation';
-import auth from '@react-native-firebase/auth';
-import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import {RouteProp} from '@react-navigation/native';
-import {AppUsage, UsageData, TimeSlotUsage} from '../types/usage';
-import firestore from '@react-native-firebase/firestore';
-import DeviceInfo from 'react-native-device-info';
-import {Device} from '../types/device';
-import {DeviceManager} from '../utils/device';
-import {Usage} from '../types/database';
+import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
+import {AppUsage, UsageData} from '../types/usage';
+import {AppState} from 'react-native';
+import DonutChart from '../components/common/DonutChart';
+import ProfileCard from '../components/common/ProfileCard';
 
-const {UsageStatsModule} = NativeModules;
+const {UsageModule} = NativeModules;
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'ChildDashboard'>;
@@ -34,7 +30,29 @@ type Props = {
 interface DetailedAppUsage extends AppUsage {
   firstTimeStamp: number;
   lastTimeStamp: number;
+  appName: string;
+  category: string;
+  packageName: string;
+  usageTime: number;
 }
+
+const getAppCategory = (categoryIndex: number | string): string => {
+  const categories: {[key: string]: string} = {
+    '-1': '시스템',
+    '0': 'Undefined',
+    '1': '게임',
+    '2': '소통',
+    '3': '다중매체',
+    '4': '뉴스',
+    '5': '소셜',
+    '6': '생산성',
+    '7': '브라우저',
+    '8': '사진',
+  };
+
+  const key = categoryIndex.toString();
+  return categories[key] || 'Unknown';
+};
 
 const ProgressBar = ({
   progress,
@@ -53,25 +71,23 @@ const ProgressBar = ({
   </View>
 );
 
-const ChildDashboardScreen = ({navigation}: Props) => {
+const ChildDashboardScreen = ({navigation, route}: Props) => {
   const [usageData, setUsageData] = useState<UsageData | null>(null);
-  const [detailedUsage, setDetailedUsage] = useState<DetailedAppUsage[]>([]);
-  const [hasPermission, setHasPermission] = useState<boolean>(false);
-  const [timeLeft, setTimeLeft] = useState<number>(0);
+  const [appUsages, setAppUsages] = useState<DetailedAppUsage[]>([]);
+  const [hasPermission, setHasPermission] = useState<boolean>(true);
   const [loading, setLoading] = useState<boolean>(true);
-  const [lastUpdateTime, setLastUpdateTime] = useState<string>('');
-  const [updateCount, setUpdateCount] = useState<number>(0);
 
   const checkPermission = async () => {
     if (Platform.OS !== 'android') return;
     try {
       console.log('권한 확인 시작');
-      const result = await UsageStatsModule.checkPermission();
+      const result = await UsageModule.checkPermission();
       console.log('권한 상태:', result);
       setHasPermission(result);
 
       if (result) {
         fetchUsageStats();
+        fetchAppUsages();
       } else {
         ToastAndroid.show(
           '앱 사용량 통계를 보려면 권한이 필요합니다',
@@ -84,183 +100,68 @@ const ChildDashboardScreen = ({navigation}: Props) => {
     }
   };
 
-  const updateFirebaseUsageData = async (data: UsageData) => {
+  const fetchAppUsages = async () => {
     try {
-      const userId = auth().currentUser?.uid;
-      const deviceInfo = await DeviceManager.getDeviceInfo();
-      const deviceId = deviceInfo.id;
-      const today = new Date().toISOString().split('T')[0];
-
-      // Validate required data
-      if (!deviceId || !today) {
-        throw new Error('Required data missing');
-      }
-
-      // Clean and validate app usage data
-      const validAppUsage = data.appUsage
-        .filter(app => app.packageName && app.appName && app.usageTime >= 0)
-        .map(app => ({
-          appId: app.appId || app.packageName,
-          packageName: app.packageName,
-          appName: app.appName,
-          usageTime: app.usageTime || 0,
-          timeLimit: app.timeLimit || 120,
-          category: app.category || 'unknown',
-          startTime: firestore.Timestamp.fromMillis(
-            app.firstTimeStamp || Date.now(),
-          ),
-          endTime: firestore.Timestamp.fromMillis(
-            app.lastTimeStamp || Date.now(),
-          ),
-        }));
-
-      const usageDoc: Usage = {
-        childId: userId || deviceId, // Fallback to deviceId if no userId
-        deviceId,
-        date: today,
-        totalUsage: data.totalUsage || 0,
-        totalLimit: data.totalLimit || 480,
-        appUsage: validAppUsage,
-        timeSlotUsage:
-          data.timeSlotUsage ||
-          Array.from({length: 24}, (_, i) => ({
-            hour: i,
-            usage: 0,
-          })),
-        lastUpdated: firestore.Timestamp.now(),
-      };
-
-      await firestore()
-        .collection('usage')
-        .doc(`${deviceId}_${today}`)
-        .set(usageDoc);
+      const stats = await UsageModule.getUsageStats(1);
+      const processedStats = await UsageModule.processUsageStats(stats);
+      setAppUsages(processedStats);
     } catch (error) {
-      console.error('Firebase 데이터 업데이트 실패:', error);
-      throw error; // Re-throw to handle in calling function
+      console.error('앱 사용시간 데이터 가져오기 실패:', error);
     }
   };
 
-  interface UsageStats {
-    packageName: string;
-    totalTimeInForeground: number;
-    firstTimeStamp: number;
-    lastTimeStamp: number;
-  }
-
   const fetchUsageStats = async () => {
-    if (!hasPermission || Platform.OS !== 'android') return;
+    if (!hasPermission || Platform.OS !== 'android') {
+      console.log('권한 없음 또는 Android 아님');
+      return;
+    }
 
     try {
-      console.log('데이터 업데이트 시작:', new Date().toLocaleTimeString());
-      setLoading(true);
-
-      const stats = (await UsageStatsModule.getUsageStats(1)) as UsageStats[];
-      console.log('원본 통계 데이터:', stats?.length, '개 앱');
-
-      const deviceInfo = await DeviceManager.getDeviceInfo();
-      const deviceId = deviceInfo.id;
-
-      const statsWithDetails = await Promise.all(
-        (stats || [])
-          .filter((stat): stat is UsageStats => Boolean(stat?.packageName))
-          .map(async stat => {
-            try {
-              const appName =
-                (await UsageStatsModule.getAppName(stat.packageName)) ||
-                stat.packageName;
-              const usageMinutes = Math.floor(
-                (stat.totalTimeInForeground || 0) / (1000 * 60),
-              );
-
-              return {
-                appId: stat.packageName,
-                appName,
-                packageName: stat.packageName,
-                usageTime: usageMinutes || 0,
-                timeLimit: 120,
-                category: 'unknown',
-                firstTimeStamp: stat.firstTimeStamp || Date.now(),
-                lastTimeStamp: stat.lastTimeStamp || Date.now(),
-              } as AppUsage;
-            } catch (err) {
-              console.error('앱 정보 처리 오류:', stat.packageName, err);
-              return null;
-            }
-          }),
-      );
-
-      const validStats = statsWithDetails.filter(
-        (stat): stat is AppUsage => stat !== null,
-      );
-      const sortedStats = validStats.sort((a, b) => b.usageTime - a.usageTime);
-
-      const totalUsage = validStats.reduce(
-        (sum, app) => sum + app.usageTime,
-        0,
-      );
-
-      const newUsageData: UsageData = {
-        id: deviceId,
-        childId: deviceId,
-        date: new Date().toISOString().split('T')[0],
-        totalUsage,
-        totalLimit: 480,
-        appUsage: sortedStats,
-        timeSlotUsage: Array.from({length: 24}, (_, i) => ({
-          hour: i,
-          usage: 0,
-        })),
-      };
-
-      const firebaseDoc = {
-        ...newUsageData,
-        lastUpdated: firestore.Timestamp.now(),
-        deviceId,
-        appUsage: sortedStats.map(app => ({
-          ...app,
-          startTime: firestore.Timestamp.fromMillis(app.firstTimeStamp),
-          endTime: firestore.Timestamp.fromMillis(app.lastTimeStamp),
-        })),
-      };
-
-      await firestore()
-        .collection('usage')
-        .doc(`${deviceId}_${newUsageData.date}`)
-        .set(firebaseDoc);
-
-      setUsageData(newUsageData);
-      setDetailedUsage(sortedStats);
-      setTimeLeft(Math.max(0, 480 - totalUsage));
-      setLastUpdateTime(new Date().toLocaleTimeString());
-      setUpdateCount(prev => prev + 1);
+      const today = new Date().toISOString().split('T')[0];
+      const data = await UsageModule.getUsageByDate(today);
+      if (data) {
+        setUsageData({
+          totalUsage: data.usageTime || 0,
+          timeLimit: data.timeLimit || 0,
+        });
+      }
     } catch (error) {
-      console.error('사용 통계 가져오기 실패:', error);
+      console.error('사용량 데이터 가져오기 오류:', error);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    console.log('컴포넌트 마운트, 초기 설정 시작');
+    checkPermission();
+  }, []);
 
-    const initialize = async () => {
-      await checkPermission();
+  useEffect(() => {
+    if (!hasPermission) return;
+
+    const fetchData = async () => {
+      await Promise.all([fetchUsageStats(), fetchAppUsages()]);
+      setTimeout(fetchData, 6000);
     };
 
-    initialize();
-
-    const interval = setInterval(() => {
-      console.log('정기 업데이트 시작:', new Date().toLocaleTimeString());
-      if (hasPermission) {
-        fetchUsageStats();
-      }
-    }, 60000);
+    fetchData();
 
     return () => {
-      console.log('컴포넌트 언마운트, 인터벌 정리');
-      clearInterval(interval);
+      // cleanup if needed
     };
   }, [hasPermission]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', nextAppState => {
+      if (nextAppState === 'active') {
+        checkPermission();
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
 
   const formatTimeRange = (start: number, end: number): string => {
     const formatTime = (timestamp: number) =>
@@ -271,16 +172,13 @@ const ChildDashboardScreen = ({navigation}: Props) => {
     return `${formatTime(start)} - ${formatTime(end)}`;
   };
 
-  const getTimeStatus = () => {
-    if (!usageData) return '데이터 로딩 중...';
-    const percentage = (usageData.totalUsage / usageData.totalLimit) * 100;
-    if (percentage >= 100) return '오늘 사용 시간이 모두 소진되었어요!';
-    if (percentage >= 80) return '사용 시간이 얼마 남지 않았어요!';
-    return '오늘도 스마트한 하루 보내세요!';
-  };
-  const requestPermission = (): void => {
+  const requestPermission = () => {
     if (Platform.OS === 'android') {
-      UsageStatsModule.openUsageSettings();
+      UsageModule.openUsageSettings();
+      ToastAndroid.show(
+        '설정에서 앱 사용 기록 액세스를 활성화해주세요.',
+        ToastAndroid.LONG,
+      );
     }
   };
 
@@ -288,22 +186,17 @@ const ChildDashboardScreen = ({navigation}: Props) => {
     navigation.replace('SelectType');
   };
 
+  const routineData = [
+    {value: 40, color: '#8CD9F0', key: '동영상'},
+    {value: 30, color: '#A5D4A7', key: '게임'},
+    {value: 20, color: '#FFD700', key: 'SNS'},
+    {value: 10, color: '#FFB6C1', key: '기타'},
+  ];
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>스마트폰 사용 관리</Text>
-        {!hasPermission && (
-          <View style={styles.permissionCard}>
-            <Text style={styles.permissionText}>
-              앱 사용량 통계를 보려면 권한이 필요합니다
-            </Text>
-            <TouchableOpacity
-              style={styles.permissionButton}
-              onPress={requestPermission}>
-              <Text style={styles.permissionButtonText}>권한 설정하기</Text>
-            </TouchableOpacity>
-          </View>
-        )}
         <TouchableOpacity
           style={styles.iconButton}
           onPress={() => {
@@ -317,58 +210,51 @@ const ChildDashboardScreen = ({navigation}: Props) => {
       </View>
 
       <ScrollView style={styles.content}>
-        <View style={styles.welcomeCard}>
-          <Text style={styles.welcomeText}>{getTimeStatus()}</Text>
-          {lastUpdateTime && (
-            <Text style={styles.updateTimeText}>
-              마지막 업데이트: {lastUpdateTime} (총 {updateCount}회)
-            </Text>
-          )}
-          {loading && (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="small" color="#2196F3" />
-              <Text style={styles.loadingText}>데이터 업데이트 중...</Text>
-            </View>
-          )}
-        </View>
+        <ProfileCard deviceId={route.params.deviceId} />
 
+        {/* 오늘의 사용 시간 */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>오늘의 사용 시간</Text>
-          <Text style={styles.usageTime}>
-            {Math.floor((usageData?.totalUsage || 0) / 60)}시간{' '}
-            {(usageData?.totalUsage || 0) % 60}분
-            <Text style={styles.usageTimeLimit}>
-              {' '}
-              / {Math.floor((usageData?.totalLimit || 0) / 60)}시간
+          <View style={styles.cardHeader}>
+            <Text style={styles.cardTitle}>오늘의 사용 시간</Text>
+            <MaterialIcons name="chevron-right" size={24} color="#666" />
+          </View>
+          <View style={styles.timeInfo}>
+            <Text style={styles.timeText}>
+              {Math.floor((usageData?.totalUsage || 0) / 60)}시간{' '}
+              {(usageData?.totalUsage || 0) % 60}분
             </Text>
-          </Text>
+            <Text style={styles.remainText}>
+              {Math.max(
+                0,
+                (usageData?.timeLimit || 0) - (usageData?.totalUsage || 0),
+              )}
+              분 남음
+            </Text>
+          </View>
           <ProgressBar
             progress={
-              ((usageData?.totalUsage || 0) / (usageData?.totalLimit || 1)) *
-              100
+              ((usageData?.totalUsage || 0) / (usageData?.timeLimit || 1)) * 100
             }
           />
-          <Text style={styles.timeLeftText}>
-            남은 시간: {Math.floor(timeLeft / 60)}시간 {timeLeft % 60}분
-          </Text>
         </View>
 
+        {/* 앱별 사용 시간 */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>앱별 사용 시간</Text>
-          {detailedUsage.map((app, index) => (
+          {appUsages.map((app, index) => (
             <View key={index} style={styles.appUsageItem}>
               <View style={styles.appInfoRow}>
-                <MaterialIcons
-                  name="android"
-                  size={24}
-                  color="#8CD9F0"
-                  style={styles.appIcon}
-                />
+                <MaterialIcons name="android" size={24} color="#8CD9F0" />
                 <View style={styles.appInfoContainer}>
                   <Text style={styles.appName}>{app.appName}</Text>
-                  <Text style={styles.timeRange}>
-                    {formatTimeRange(app.firstTimeStamp, app.lastTimeStamp)}
-                  </Text>
+                  <View style={styles.appMetaInfo}>
+                    <Text style={styles.categoryText}>
+                      {getAppCategory(app.category)}
+                    </Text>
+                    <Text style={styles.timeRange}>
+                      {formatTimeRange(app.firstTimeStamp, app.lastTimeStamp)}
+                    </Text>
+                  </View>
                 </View>
                 <Text style={styles.timeText}>
                   {Math.floor(app.usageTime / 60)}:
@@ -376,22 +262,49 @@ const ChildDashboardScreen = ({navigation}: Props) => {
                 </Text>
               </View>
               <ProgressBar
-                progress={(app.usageTime / app.timeLimit) * 100}
+                progress={(app.usageTime / (usageData?.timeLimit || 1)) * 100}
                 color="#8CD9F0"
               />
             </View>
           ))}
         </View>
+
+        {/* 나의 사용 루틴 */}
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <Text style={styles.cardTitle}>나의 사용 루틴</Text>
+            <MaterialIcons name="chevron-right" size={24} color="#666" />
+          </View>
+          <View style={styles.routineContainer}>
+            <DonutChart data={routineData} size={120} />
+            <View style={styles.legendContainer}>
+              {routineData.map((item, index) => (
+                <View key={index} style={styles.legendItem}>
+                  <View
+                    style={[styles.legendDot, {backgroundColor: item.color}]}
+                  />
+                  <View style={styles.legendContent}>
+                    <Text style={styles.legendLabel}>{item.key}</Text>
+                    <Text style={styles.legendValue}>{item.value}%</Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+          </View>
+        </View>
       </ScrollView>
 
+      {/* Bottom Navigation */}
       <View style={styles.bottomNav}>
         <TouchableOpacity style={[styles.navItem, styles.navItemActive]}>
           <MaterialIcons name="home" size={24} color="#8CD9F0" />
           <Text style={[styles.navText, styles.navTextActive]}>홈</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem}>
+        <TouchableOpacity
+          style={styles.navItem}
+          onPress={() => navigation.navigate('LifePatternComic')}>
           <MaterialIcons name="bar-chart" size={24} color="#666" />
-          <Text style={styles.navText}>통계</Text>
+          <Text style={styles.navText}>만화</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.navItem}>
           <MaterialIcons name="settings" size={24} color="#666" />
@@ -473,28 +386,31 @@ const styles = StyleSheet.create({
     shadowRadius: 3.84,
     elevation: 5,
   },
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
   cardTitle: {
     fontSize: 18,
     fontWeight: '600',
-    marginBottom: 12,
     color: '#333',
   },
-  usageTime: {
-    fontSize: 24,
+  timeInfo: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  timeText: {
+    fontSize: 16,
     fontWeight: '500',
-    marginBottom: 12,
     color: '#333',
   },
-  usageTimeLimit: {
-    color: '#666',
-    fontSize: 18,
-    fontWeight: 'normal',
-  },
-  timeLeftText: {
+  remainText: {
     fontSize: 14,
     color: '#666',
-    textAlign: 'right',
-    marginTop: 8,
   },
   progressBarContainer: {
     height: 8,
@@ -519,21 +435,30 @@ const styles = StyleSheet.create({
   },
   appInfoContainer: {
     flex: 1,
+    marginLeft: 12,
   },
   appName: {
     fontSize: 14,
-    color: '#333',
     fontWeight: '500',
+    color: '#333',
+  },
+  appMetaInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 4,
+  },
+  categoryText: {
+    fontSize: 12,
+    color: '#666',
+    backgroundColor: '#f0f0f0',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
   },
   timeRange: {
     fontSize: 12,
     color: '#666',
-    marginTop: 2,
-  },
-  timeText: {
-    fontSize: 14,
-    color: '#333',
-    fontWeight: '500',
   },
   bottomNav: {
     flexDirection: 'row',
@@ -582,6 +507,70 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 14,
     fontWeight: '500',
+  },
+  profileCard: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  profileContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 50,
+  },
+  profileCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#E0E0E0',
+  },
+  profileText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+  },
+  evaluationText: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    padding: 16,
+  },
+  routineContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  legendContainer: {
+    flex: 1,
+    marginLeft: 24,
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  legendDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginRight: 8,
+  },
+  legendContent: {
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  legendLabel: {
+    fontSize: 14,
+    color: '#333',
+  },
+  legendValue: {
+    fontSize: 14,
+    color: '#666',
   },
 });
 

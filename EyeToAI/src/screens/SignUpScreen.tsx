@@ -12,11 +12,15 @@ import {
   Platform,
   ScrollView,
   Alert,
+  Modal,
 } from 'react-native';
 import {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {RootStackParamList} from '../types/navigation';
 import auth from '@react-native-firebase/auth';
-import firestore from '@react-native-firebase/firestore';
+import firestore, {
+  FirebaseFirestoreTypes,
+} from '@react-native-firebase/firestore';
+
 import {ConnectionStatus} from '../components/common/ConnectionStatus';
 import ItoaiLogo2 from '../assets/icons/itoai-icon2.svg';
 import {SvgProps} from 'react-native-svg';
@@ -53,80 +57,48 @@ const SignUpScreen = ({navigation, route}: Props) => {
       }
 
       try {
-        // 현재 기기 정보 가져오기
-        const deviceInfo = await DeviceManager.getDeviceInfo();
+        // 익명 인증으로 userId 생성
 
-        // 부모 ID와 기기 ID가 없으면 오류
-        if (!route.params.parentId || !route.params.deviceId) {
+        const userCredential = await auth().signInAnonymously();
+        const userId = userCredential.user.uid;
+
+        const deviceInfo = await DeviceManager.getDeviceInfo();
+        if (!deviceInfo?.deviceId) {
+          throw new Error('디바이스 정보를 가져올 수 없습니다');
+        }
+
+        if (!parentCode || !route.params?.parentId) {
           throw new Error('연결 정보가 없습니다.');
         }
 
-        // Firestore 트랜잭션으로 처리
         await firestore().runTransaction(async transaction => {
-          const deviceInfo = await DeviceManager.getDeviceInfo();
-          const childId = deviceInfo.id;
+          console.log('Firestore 트랜잭션 시작');
 
-          // 1. users 컬렉션에 자녀 정보 저장
-          const userRef = firestore().collection('users').doc(childId);
+          const userRef = firestore().collection('users').doc(userId);
           transaction.set(userRef, {
-            name,
-            age: parseInt(age, 10),
-            gender,
-            userType: 'child',
-            parentId: route.params.parentId,
-            deviceId: deviceInfo.id,
-            createdAt: firestore.FieldValue.serverTimestamp(),
+            // User 데이터
           });
+          console.log('User 데이터 추가 완료');
 
-          // 2. devices 컬렉션 업데이트
           const deviceRef = firestore()
             .collection('devices')
-            .doc(deviceInfo.id);
+            .doc(deviceInfo.deviceId);
           transaction.set(deviceRef, {
-            // update 대신 set 사용
-            childId,
-            name: `${name}의 기기`,
-            status: 'active',
-            updatedAt: firestore.FieldValue.serverTimestamp(),
+            // Device 데이터
           });
-
-          // 3. connections 컬렉션
-          const connectionRef = firestore()
-            .collection('connections')
-            .doc(`${route.params.parentId}_${deviceInfo.id}`);
-
-          transaction.set(connectionRef, {
-            deviceId: deviceInfo.id,
-            childId,
-            parentId: route.params.parentId,
-            status: 'active',
-            createdAt: firestore.FieldValue.serverTimestamp(),
-            deviceInfo: {
-              name: `${name}의 기기`,
-              model: deviceInfo.model,
-              platform: deviceInfo.platform,
-              osVersion: deviceInfo.osVersion,
-            },
-          });
+          console.log('Device 데이터 추가 완료');
         });
 
-        // 로컬 기기 정보 업데이트
         await DeviceManager.updateDeviceInfo({
-          childId: route.params.deviceId,
+          childId: deviceInfo.deviceId,
           parentId: route.params.parentId,
           status: 'active',
         });
 
-        Alert.alert('성공', '회원가입이 완료되었습니다.', [
-          {
-            text: '확인',
-            onPress: () => {
-              navigation.replace('ChildDashboard', {
-                userType: 'child',
-              });
-            },
-          },
-        ]);
+        navigation.replace('ChildDashboard', {
+          userType: 'child',
+          deviceId: deviceInfo.deviceId,
+        });
       } catch (error: any) {
         console.error('회원가입 오류:', error);
         Alert.alert(
@@ -135,19 +107,13 @@ const SignUpScreen = ({navigation, route}: Props) => {
         );
       }
     } else {
-      // 부모 회원가입 로직은 그대로 유지
-      if (!name || !email || !password || !confirmPassword) {
+      if (!name || !email || !password || !confirmPassword || !parentType) {
         Alert.alert('오류', '모든 필드를 입력해주세요.');
         return;
       }
 
       if (password !== confirmPassword) {
         Alert.alert('오류', '비밀번호가 일치하지 않습니다.');
-        return;
-      }
-
-      if (!parentType) {
-        Alert.alert('오류', '보호자 구분을 선택해주세요.');
         return;
       }
 
@@ -158,11 +124,10 @@ const SignUpScreen = ({navigation, route}: Props) => {
         );
 
         await firestore().collection('users').doc(userCredential.user.uid).set({
-          name,
           email,
+          name,
           userType: 'parent',
-          parentType,
-          createdAt: firestore.FieldValue.serverTimestamp(),
+          userId: userCredential.user.uid,
         });
 
         navigation.replace('ParentDashboard', {
@@ -558,6 +523,34 @@ const styles = StyleSheet.create({
   },
   disabledButton: {
     backgroundColor: '#E5E5E5',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 20,
+    width: '80%',
+  },
+  modalHeader: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E5E5',
+    paddingBottom: 10,
+    marginBottom: 10,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+  },
+  optionButton: {
+    padding: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E5E5',
   },
 });
 

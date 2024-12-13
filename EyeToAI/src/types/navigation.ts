@@ -1,5 +1,6 @@
+//src.types.navigation.ts
+
 export type RootStackParamList = {
-  // 공통 화면
   SelectType: undefined;
   Login: {
     userType: 'parent' | 'child';
@@ -7,13 +8,11 @@ export type RootStackParamList = {
   SignUp: {
     userType: 'parent' | 'child';
     parentId?: string;
-    connectionCode?: string;
     deviceId?: string;
   };
-
-  // 부모용 화면
   ParentDashboard: {
     userType: 'parent';
+    userId?: string;
   };
   FamilyProfile: {
     userType: 'parent';
@@ -23,14 +22,28 @@ export type RootStackParamList = {
     deviceId: string;
     reportType: 'total' | 'apps' | 'routine' | 'ai';
   };
-
-  // 자녀용 화면
   ChildDashboard: {
     userType: 'child';
+    deviceId: string;
   };
-  QRScan: undefined; // 단순화: deviceInfo를 내부 상태로 관리
+  QRScan: undefined;
   UsageTrackerTest: undefined;
   FamilyAuth: {
     userType: 'child';
   };
+  TimeManagement: undefined;
+  AppTimeLimit: undefined;
+  TotalTimeLimit: undefined;
+  WeeklyTimeLimit: undefined;
+  DayTimeLimit: {
+    day: string;
+  };
+  SleepTimeLimit: undefined;
+  Report: {
+    totalTime: number;
+    targetTime: number;
+  };
+
+  SelfEvaluation: undefined;
+  LifePatternComic: undefined;
 };

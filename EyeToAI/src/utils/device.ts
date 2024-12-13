@@ -1,98 +1,105 @@
-// src/utils/device.ts
 import {Platform} from 'react-native';
 import DeviceInfo from 'react-native-device-info';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import firestore from '@react-native-firebase/firestore';
-import {Device, DeviceStatus} from '../types/device';
+import {Device} from '../types/device';
 
 const DEVICE_ID_KEY = '@device_id';
 const DEVICE_INFO_KEY = '@device_info';
 
 export const DeviceManager = {
   async generateDeviceId(): Promise<string> {
-    let deviceId = await AsyncStorage.getItem(DEVICE_ID_KEY);
+    try {
+      let deviceId = await AsyncStorage.getItem(DEVICE_ID_KEY);
 
-    if (!deviceId) {
-      deviceId = `${Platform.OS}-${Date.now()}-${Math.random()
-        .toString(36)
-        .substr(2, 9)}`;
-      await AsyncStorage.setItem(DEVICE_ID_KEY, deviceId);
+      if (!deviceId) {
+        // 고유 디바이스 ID 생성
+        const uniqueId = await DeviceInfo.getUniqueId();
+        const deviceModel = await DeviceInfo.getModel();
+        const deviceOS = await DeviceInfo.getSystemVersion();
+
+        // 고유 식별자를 조합
+        deviceId = `${uniqueId}-${deviceModel}-${deviceOS}`;
+        await AsyncStorage.setItem(DEVICE_ID_KEY, deviceId);
+
+        console.log('New deviceId generated:', deviceId);
+      } else {
+        console.log('Existing deviceId found:', deviceId);
+      }
+
+      return deviceId;
+    } catch (error) {
+      console.error('generateDeviceId error:', error);
+      throw new Error('디바이스 ID 생성 실패');
     }
-
-    return deviceId;
   },
 
   async getDeviceInfo(): Promise<Device> {
-    const deviceId = await this.generateDeviceId();
-    const cachedInfo = await AsyncStorage.getItem(DEVICE_INFO_KEY);
+    try {
+      const deviceId = await this.generateDeviceId();
+      const cachedInfo = await AsyncStorage.getItem(DEVICE_INFO_KEY);
 
-    if (cachedInfo) {
-      return JSON.parse(cachedInfo);
+      if (cachedInfo) {
+        const parsedInfo = JSON.parse(cachedInfo);
+        // 기존 캐시에 deviceId가 없으면 추가
+        if (!parsedInfo.deviceId) {
+          parsedInfo.deviceId = deviceId;
+          await AsyncStorage.setItem(
+            DEVICE_INFO_KEY,
+            JSON.stringify(parsedInfo),
+          );
+        }
+        return parsedInfo;
+      }
+
+      console.log('Gathering device information...');
+
+      const deviceInfo: Device = {
+        deviceId,
+        childId: '',
+        parentId: '',
+        name: await DeviceInfo.getDeviceName(),
+        model: await DeviceInfo.getModel(),
+        platform: Platform.OS,
+        osVersion: await DeviceInfo.getSystemVersion(),
+        status: 'pending',
+        deviceStatus: 'normal',
+        lastConnected: firestore.Timestamp.now(),
+        settings: {
+          dailyLimit: 480,
+          notifications: true,
+        },
+      };
+
+      console.log('Created device info:', deviceInfo);
+      await AsyncStorage.setItem(DEVICE_INFO_KEY, JSON.stringify(deviceInfo));
+
+      return deviceInfo;
+    } catch (error) {
+      console.error('getDeviceInfo error:', error);
+      throw new Error('디바이스 정보 가져오기 실패');
     }
-
-    const deviceInfo: Device = {
-      id: deviceId,
-      name: await DeviceInfo.getDeviceName(),
-      model: DeviceInfo.getModel(),
-      platform: Platform.OS as 'ios' | 'android',
-      osVersion: Platform.Version.toString(),
-      lastConnected: new Date(),
-      status: 'pending',
-      usage: {
-        lastUpdated: new Date(),
-        dailyLimit: null,
-        weeklyLimit: null,
-        restrictions: [],
-      },
-    };
-
-    await AsyncStorage.setItem(DEVICE_INFO_KEY, JSON.stringify(deviceInfo));
-    return deviceInfo;
   },
 
   async updateDeviceInfo(updates: Partial<Device>): Promise<void> {
     try {
+      console.log('Updating device info with:', updates);
       const currentInfo = await this.getDeviceInfo();
       const updatedInfo = {...currentInfo, ...updates};
 
-      // 로컬 저장소 업데이트
       await AsyncStorage.setItem(DEVICE_INFO_KEY, JSON.stringify(updatedInfo));
 
-      // Firestore 업데이트
-      if (updatedInfo.status === 'connected') {
+      if (updatedInfo.status === 'active') {
         await firestore()
           .collection('devices')
-          .doc(updatedInfo.id)
+          .doc(updatedInfo.deviceId)
           .set(updatedInfo, {merge: true});
       }
+
+      console.log('Device info updated successfully');
     } catch (error) {
-      console.error('기기 정보 업데이트 중 오류:', error);
-      throw error;
-    }
-  },
-
-  // 기기 사용 정보 동기화
-  async syncUsageData(): Promise<void> {
-    try {
-      const deviceInfo = await this.getDeviceInfo();
-      if (deviceInfo.status !== 'connected') return;
-
-      // 현재 사용 정보 수집
-      const usageStats = await DeviceInfo.getUsageStats();
-
-      await firestore()
-        .collection('devices')
-        .doc(deviceInfo.id)
-        .collection('usage')
-        .add({
-          timestamp: firestore.FieldValue.serverTimestamp(),
-          stats: usageStats,
-          batteryLevel: await DeviceInfo.getBatteryLevel(),
-          isCharging: await DeviceInfo.isBatteryCharging(),
-        });
-    } catch (error) {
-      console.error('사용 정보 동기화 중 오류:', error);
-      throw error;
+      console.error('updateDeviceInfo error:', error);
+      throw new Error('디바이스 정보 업데이트 실패');
     }
   },
 };

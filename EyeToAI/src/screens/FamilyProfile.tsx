@@ -7,6 +7,7 @@ import {
   LayoutAnimation,
   Platform,
   UIManager,
+  ActivityIndicator,
 } from 'react-native';
 import {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {RootStackParamList} from '../types/navigation';
@@ -42,27 +43,22 @@ const FamilyProfileScreen = ({navigation, route}: Props) => {
   const [parentExpanded, setParentExpanded] = useState(true);
   const [childProfiles, setChildProfiles] = useState<ChildProfile[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    setIsLoading(true);
+
     const fetchChildProfiles = async () => {
       const parentId = auth().currentUser?.uid;
       if (!parentId) return;
 
       try {
-        // 부모 문서와 연결 정보를 병렬로 가져오기
-        const [parentDoc, connectionsSnapshot] = await Promise.all([
-          firestore().collection('users').doc(parentId).get(),
-          firestore()
-            .collection('connections')
-            .where('parentId', '==', parentId)
-            .where('status', '==', 'active')
-            .get(),
-        ]);
+        const connectionsSnapshot = await firestore()
+          .collection('connections')
+          .where('parentId', '==', parentId)
+          .where('status', '==', 'connected')
+          .get();
 
-        const currentDeviceId = parentDoc.data()?.selectedDeviceId || '';
-        setSelectedDeviceId(currentDeviceId);
-
-        // 자녀 문서 조회를 병렬로 처리
         const childPromises = connectionsSnapshot.docs.map(async doc => {
           const connection = doc.data();
           const childDoc = await firestore()
@@ -71,48 +67,32 @@ const FamilyProfileScreen = ({navigation, route}: Props) => {
             .get();
 
           return {
-            connection,
-            childData: childDoc.data(),
-          };
+            childId: connection.childId,
+            deviceId: connection.deviceId,
+            name: childDoc.data()?.name || '',
+            status: connection.status,
+            isSelected: false,
+          } as ChildProfile;
         });
 
-        const childResults = await Promise.all(childPromises);
-
-        // Map을 사용하여 중복 제거 및 데이터 변환
-        const uniqueProfiles = new Map<string, ChildProfile>();
-        childResults.forEach(({connection, childData}) => {
-          if (childData && !uniqueProfiles.has(childData.deviceId)) {
-            uniqueProfiles.set(childData.deviceId, {
-              childId: connection.childId,
-              deviceId: connection.deviceId,
-              name: childData.name,
-              status: connection.status,
-              isSelected: connection.deviceId === currentDeviceId,
-            });
-          }
-        });
-
-        setChildProfiles(Array.from(uniqueProfiles.values()));
+        setChildProfiles(await Promise.all(childPromises));
       } catch (error) {
-        console.error('Error fetching child profiles:', error);
+        console.error('Error:', error);
+      } finally {
+        setIsLoading(false);
       }
     };
 
-    fetchChildProfiles();
-
-    // 실시간 업데이트를 위한 리스너 설정
     const parentId = auth().currentUser?.uid;
     if (!parentId) return;
 
-    const unsubscribe = firestore()
+    fetchChildProfiles();
+
+    return firestore()
       .collection('connections')
       .where('parentId', '==', parentId)
-      .where('status', '==', 'active')
-      .onSnapshot(snapshot => {
-        fetchChildProfiles();
-      });
-
-    return () => unsubscribe();
+      .where('status', '==', 'connected')
+      .onSnapshot(fetchChildProfiles);
   }, []);
 
   const handleDeviceSelect = async (deviceId: string, childName: string) => {
@@ -175,32 +155,42 @@ const FamilyProfileScreen = ({navigation, route}: Props) => {
           title="자녀 프로필"
           isExpanded={childExpanded}
           onPress={() => toggleSection('child')}>
-          {childProfiles.map(child => (
-            <TouchableOpacity
-              key={child.deviceId}
-              style={[
-                styles.childProfile,
-                child.isSelected && styles.selectedChildProfile,
-              ]}
-              onPress={() => handleDeviceSelect(child.deviceId, child.name)}>
-              <View style={styles.childInfo}>
-                <Text style={styles.childName}>{child.name}</Text>
-                <Text style={styles.deviceId}>Device ID: {child.deviceId}</Text>
-              </View>
-              <View style={styles.selectButton}>
-                <Text style={styles.selectText}>
-                  {child.isSelected ? '연결 해제' : '연결하기'}
-                </Text>
-                <MaterialIcons
-                  name={
-                    child.isSelected ? 'check-circle' : 'radio-button-unchecked'
-                  }
-                  size={24}
-                  color="#8CD9F0"
-                />
-              </View>
-            </TouchableOpacity>
-          ))}
+          {isLoading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#8CD9F0" />
+            </View>
+          ) : (
+            childProfiles.map(child => (
+              <TouchableOpacity
+                key={child.deviceId}
+                style={[
+                  styles.childProfile,
+                  child.isSelected && styles.selectedChildProfile,
+                ]}
+                onPress={() => handleDeviceSelect(child.deviceId, child.name)}>
+                <View style={styles.childInfo}>
+                  <Text style={styles.childName}>{child.name}</Text>
+                  <Text style={styles.deviceId}>
+                    Device ID: {child.deviceId}
+                  </Text>
+                </View>
+                <View style={styles.selectButton}>
+                  <Text style={styles.selectText}>
+                    {child.isSelected ? '연결 해제' : '연결하기'}
+                  </Text>
+                  <MaterialIcons
+                    name={
+                      child.isSelected
+                        ? 'check-circle'
+                        : 'radio-button-unchecked'
+                    }
+                    size={24}
+                    color="#8CD9F0"
+                  />
+                </View>
+              </TouchableOpacity>
+            ))
+          )}
         </ProfileSection>
 
         <ProfileSection
@@ -223,6 +213,10 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: 'white',
+  },
+  loadingContainer: {
+    padding: 20,
+    alignItems: 'center',
   },
   description: {
     fontSize: 16,

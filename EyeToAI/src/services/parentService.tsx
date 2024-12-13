@@ -1,10 +1,19 @@
-// services/parentService.ts
 import firestore from '@react-native-firebase/firestore';
-import {Device, Connection, User, DeviceUsageData} from '../types/database';
+import {
+  Device,
+  Connection,
+  User,
+  DeviceUsageData,
+  Usage,
+} from '../types/database';
 import {UsageService} from './usageService';
 import DeviceInfo from 'react-native-device-info';
 import {Platform} from 'react-native';
-import {Usage} from '../types/database';
+
+interface ChildConnectionWithName extends Connection {
+  childName: string;
+}
+
 export class ParentService {
   static async createDevice(
     deviceId: string,
@@ -35,27 +44,35 @@ export class ParentService {
     return deviceDoc.data() as Device;
   }
 
-  static async getChildConnections(parentId: string) {
+  static async getChildConnections(
+    parentId: string,
+  ): Promise<ChildConnectionWithName[]> {
     const connectionsSnapshot = await firestore()
       .collection('connections')
       .where('parentId', '==', parentId)
       .where('status', '==', 'active')
       .get();
 
-    const childConnections = [];
+    const childConnections: ChildConnectionWithName[] = [];
     for (const doc of connectionsSnapshot.docs) {
       const connection = doc.data() as Connection;
-      const childDoc = await firestore()
-        .collection('users')
-        .doc(connection.deviceId)
-        .get();
 
-      const childData = childDoc.data() as User;
-      if (childData?.userType === 'child') {
-        childConnections.push({
-          ...connection,
-          childName: childData.name,
-        });
+      // Use Promise.all to fetch all child documents in parallel
+      const childPromises = connection.deviceIds.map(deviceId =>
+        firestore().collection('users').doc(deviceId).get(),
+      );
+
+      const childDocs = await Promise.all(childPromises);
+
+      for (const childDoc of childDocs) {
+        const childData = childDoc.data() as User;
+        if (childData?.userType === 'child') {
+          childConnections.push({
+            ...connection,
+            childName: childData.name,
+          });
+          break; // Only add the connection once per child
+        }
       }
     }
 
@@ -74,7 +91,6 @@ export class ParentService {
     if (!deviceDoc.exists) return null;
 
     const device = deviceDoc.data() as Device;
-    // usage 데이터를 명시적으로 Usage 타입으로 캐스팅
     const usage = usageDoc.exists ? (usageDoc.data() as Usage) : null;
 
     if (!usage) return null;

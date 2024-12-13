@@ -1,6 +1,3 @@
-// src/types/usage.ts
-import {FirebaseFirestoreTypes} from '@react-native-firebase/firestore';
-
 export interface AppUsage {
   appId: string;
   appName: string;
@@ -21,13 +18,9 @@ export interface TimeSlotUsage {
   hour: number;
   usage: number; // 분 단위
 }
-
 export interface UsageData {
-  id: string;
-  childId: string;
-  date: string;
-  totalUsage: number;
-  totalLimit: number;
-  appUsage: AppUsage[];
-  timeSlotUsage: TimeSlotUsage[];
+  totalUsage?: number;
+  timeLimit?: number; // timeLimit 추가
+  status?: string;
+  appUsages?: AppUsage[];
 }

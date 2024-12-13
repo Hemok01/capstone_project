@@ -43,26 +43,15 @@ const QRScanScreen = ({navigation}: Props) => {
     try {
       const testCode = 'TEST123';
       const parentId = 'w6j49nvFOYYp4dHVWlWij3QtK7u1';
-      const deviceInfo = await DeviceManager.getDeviceInfo();
 
-      if (!deviceInfo) {
-        throw new Error('기기 정보를 가져올 수 없습니다');
-      }
+      await firestore().collection('connections').doc().set({
+        parentId,
+        status: 'pending',
+        lastSync: firestore.FieldValue.serverTimestamp(),
+        deviceId: null, // 아직 연결되지 않은 상태
+      });
 
-      await firestore()
-        .collection('connectionCodes')
-        .doc(testCode)
-        .set({
-          parentId,
-          createdAt: firestore.FieldValue.serverTimestamp(),
-          expiresAt: new Date(Date.now() + 300000),
-          isUsed: false,
-          isExpired: false,
-          deviceIds: [],
-          maxDevices: 5,
-        });
-
-      console.log('Test connection code created successfully');
+      console.log('Test connection created');
     } catch (error) {
       console.error('Error:', error);
       Alert.alert(
@@ -73,6 +62,69 @@ const QRScanScreen = ({navigation}: Props) => {
       );
     }
   };
+
+  const processConnectionCode = async (code: string) => {
+    if (isProcessingCode) return;
+
+    setIsProcessingCode(true); // 로딩 상태 설정
+    try {
+      const deviceInfo = await DeviceManager.getDeviceInfo();
+      console.log('Device Info:', deviceInfo);
+
+      const parentId = 'whHjZw7lAFcwnoBX9ei9JospP8J2'; // 부모 ID (테스트용)
+
+      // Firestore 업데이트: devices 컬렉션
+      await firestore().collection('devices').doc(deviceInfo.deviceId).set({
+        name: deviceInfo.name,
+        status: 'active',
+        lastActive: firestore.FieldValue.serverTimestamp(),
+      });
+
+      console.log('Device registered in Firestore');
+
+      // Firestore 생성 및 업데이트: connections 컬렉션
+      const connectionRef = firestore().collection('connections').doc(code);
+      const connectionDoc = await connectionRef.get();
+
+      if (!connectionDoc.exists) {
+        // QR 코드 데이터 기반 connections 문서 생성
+        await connectionRef.set({
+          parentId, // 부모 ID
+          deviceId: deviceInfo.deviceId,
+          status: 'connected',
+          createdAt: firestore.FieldValue.serverTimestamp(),
+          lastSync: firestore.FieldValue.serverTimestamp(),
+        });
+        console.log('New connection created in Firestore');
+      } else {
+        // 기존 문서가 존재할 경우 업데이트
+        await connectionRef.update({
+          deviceId: deviceInfo.deviceId,
+          status: 'connected',
+          lastSync: firestore.FieldValue.serverTimestamp(),
+        });
+        console.log('Existing connection updated in Firestore');
+      }
+
+      // 네비게이션 이동
+      navigation.replace('SignUp', {
+        userType: 'child',
+        deviceId: deviceInfo.deviceId,
+        parentId,
+      });
+    } catch (error) {
+      console.error('Error in processConnectionCode:', error);
+      Alert.alert(
+        'QR 코드 처리 실패',
+        error instanceof Error
+          ? error.message
+          : '알 수 없는 오류가 발생했습니다',
+      );
+    } finally {
+      setIsProcessingCode(false); // 로딩 상태 해제
+    }
+  };
+
   const requestCameraPermission = async () => {
     try {
       const permission = Platform.select({
@@ -101,44 +153,6 @@ const QRScanScreen = ({navigation}: Props) => {
   };
   // QRScanScreen.tsx 수정사항
   // QRScanScreen.tsx
-  const processConnectionCode = async (code: string) => {
-    if (isProcessingCode) return;
-
-    try {
-      setIsProcessingCode(true);
-      const deviceInfo = await DeviceManager.getDeviceInfo();
-
-      if (!deviceInfo || !code) {
-        throw new Error('필수 데이터가 누락되었습니다');
-      }
-
-      const codeDoc = await firestore()
-        .collection('connectionCodes')
-        .doc(code)
-        .get();
-
-      if (!codeDoc.exists || !codeDoc.data()?.parentId) {
-        throw new Error('유효하지 않은 QR 코드입니다');
-      }
-
-      navigation.replace('SignUp', {
-        userType: 'child',
-        deviceId: deviceInfo.id,
-        connectionCode: code,
-        parentId: codeDoc.data()?.parentId,
-      });
-    } catch (error) {
-      console.error('QR Error:', error);
-      Alert.alert(
-        'QR 코드 처리 실패',
-        error instanceof Error
-          ? error.message
-          : '알 수 없는 오류가 발생했습니다',
-      );
-    } finally {
-      setIsProcessingCode(false);
-    }
-  };
 
   const onCodeScanned = (event: any) => {
     /*

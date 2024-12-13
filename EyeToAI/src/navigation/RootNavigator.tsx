@@ -1,4 +1,6 @@
-import React from 'react';
+//src/navigation/Rootnavigator.tsx
+
+import React, {FC} from 'react';
 import {NavigationContainer} from '@react-navigation/native';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import {RootStackParamList} from '../types/navigation';
@@ -11,18 +13,21 @@ import ChildDashboardScreen from '../screens/ChildDashboardScreen';
 import FamilyProfileScreen from '../screens/FamilyProfile';
 import QRCodeScreen from '../screens/QRCodeScreen';
 import QRScanScreen from '../screens/QRScanScreen';
-import UsageReportScreen from '../screens/UsageReportScreen';
+import ReportScreen from '../screens/ReportScreen';
 import {RouteProp} from '@react-navigation/native';
 import {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import FamilyAuthScreen from '../screens/FamilyAuthScreen';
 import UsageTrackerTest from '../components/common/UsageTrackerTest';
+import TimeManagementScreen from '../screens/TimeManagementScreen';
+import AppTimeLimitScreen from '../screens/AppTimeLimitScreen';
+import TotalTimeLimitScreen from '../screens/TotalTimeLimitScreen';
+import WeeklyTimeLimitScreen from '../screens/WeeklyTimeLimitScreen';
+import DayTimeLimitScreen from '../screens/DayTimeLimitScreen';
+import SleepTimeLimitScreen from '../screens/SleepTimeLimitScreen';
+import SelfEvaluationScreen from '../screens/SelfEvaluation';
+import LifePatternComicScreen from '../screens/LifePatternComicScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
-
-type SignUpScreenProps = {
-  route: RouteProp<RootStackParamList, 'SignUp'>;
-  navigation: NativeStackNavigationProp<RootStackParamList, 'SignUp'>;
-};
 
 const RootNavigator = () => {
   return (
@@ -38,16 +43,28 @@ const RootNavigator = () => {
           component={ParentDashboardScreen}
         />
         <Stack.Screen name="FamilyAuth" component={FamilyAuthScreen} />
+        <Stack.Screen name="Report" component={ReportScreen} />
+        <Stack.Screen
+          name="LifePatternComic"
+          component={LifePatternComicScreen}
+        />
 
+        <Stack.Screen name="SleepTimeLimit" component={SleepTimeLimitScreen} />
         <Stack.Screen name="ChildDashboard" component={ChildDashboardScreen} />
         <Stack.Screen name="FamilyProfile" component={FamilyProfileScreen} />
         <Stack.Screen name="QRCode" component={QRCodeScreen} />
         <Stack.Screen name="QRScan" component={QRScanScreen} />
+        <Stack.Screen name="SelfEvaluation" component={SelfEvaluationScreen} />
+
+        <Stack.Screen name="TimeManagement" component={TimeManagementScreen} />
+        <Stack.Screen name="AppTimeLimit" component={AppTimeLimitScreen} />
+        <Stack.Screen name="TotalTimeLimit" component={TotalTimeLimitScreen} />
         <Stack.Screen
-          name="UsageReport"
-          component={UsageReportScreen}
-          options={{headerShown: false}}
+          name="WeeklyTimeLimit"
+          component={WeeklyTimeLimitScreen}
         />
+        <Stack.Screen name="DayTimeLimit" component={DayTimeLimitScreen} />
+
         <Stack.Screen name="UsageTrackerTest" component={UsageTrackerTest} />
       </Stack.Navigator>
     </NavigationContainer>
