@@ -29,15 +29,14 @@ class MainApplication : Application(), ReactApplication {
         super.onCreate()
         SoLoader.init(this, false)
 
-        // Firebase 초기화
-        if (FirebaseApp.getApps(this).isEmpty()) {
-            FirebaseApp.initializeApp(this, FirebaseOptions.Builder()
-                .setApiKey("AIzaSyAEkJGdvEOCHceuGTiAKWbB_-KepA-RWZo")
-                .setApplicationId("1:598185887142:android:d5e9a9b3ed2d14caf9fb67")
-                .setProjectId("eyetoai")
-                .setStorageBucket("eyetoai.appspot.com")
-                .build()
-            )
-        }
+if (FirebaseApp.getApps(this).isEmpty()) {
+    FirebaseOptions options = new FirebaseOptions.Builder()
+            .setApiKey(BuildConfig.FIREBASE_API_KEY)
+            .setApplicationId(BuildConfig.FIREBASE_APP_ID)
+            .setProjectId(BuildConfig.FIREBASE_PROJECT_ID)
+            .setStorageBucket(BuildConfig.FIREBASE_STORAGE_BUCKET)
+            .build();
+    FirebaseApp.initializeApp(this, options);
+}
     }
 }

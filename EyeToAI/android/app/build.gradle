@@ -86,3 +86,22 @@ dependencies {
     // Vision Camera & SVG
     implementation(project(':react-native-svg'))
 }
+
+
+def getEnvVariable(String name) {
+    return System.getenv(name) ?: project.properties[name]
+}
+
+
+def firebaseApiKey = getEnvVariable("FIREBASE_API_KEY")
+def firebaseAppId = getEnvVariable("FIREBASE_APP_ID")
+def firebaseProjectId = getEnvVariable("FIREBASE_PROJECT_ID")
+def firebaseStorageBucket = getEnvVariable("FIREBASE_STORAGE_BUCKET")
+
+
+buildTypes.each {
+    it.buildConfigField 'String', 'FIREBASE_API_KEY', "\"${firebaseApiKey}\""
+    it.buildConfigField 'String', 'FIREBASE_APP_ID', "\"${firebaseAppId}\""
+    it.buildConfigField 'String', 'FIREBASE_PROJECT_ID', "\"${firebaseProjectId}\""
+    it.buildConfigField 'String', 'FIREBASE_STORAGE_BUCKET', "\"${firebaseStorageBucket}\""
+}
